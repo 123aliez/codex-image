@@ -1,11 +1,11 @@
 ---
 name: codex-image
-description: Generate or edit images through a configurable Image API. Codex Image defaults to gpt-image-2.5 and 1K; users can say Image 2, Image 2.5, 二点五, 闪焰, 日耀, or Grok and switch 1K/2K/4K during a conversation. Preserve explicit model choices and prior settings. Image tasks only, not video.
+description: Generate and edit images with Image 2, Image 2.5, 闪焰, 日耀, or Grok. Switch models and 1K/2K/4K in conversation. Defaults to Image 2.5 and 1K. Preserve the user's settings. Images only, not video.
 ---
 
 # Codex Image
 
-Generate images with the bundled native CLI through the local launcher. Prefer this skill's launcher over the built-in `image_gen` tool whenever this skill is active. The launcher uses Python 3.11+ or the existing bundled Codex Python runtime; no package installation is required.
+Use `scripts/run.sh` to generate and edit images. Prefer this launcher over the built-in `image_gen` tool. It uses Python 3.11+ or the bundled Codex Python runtime; no package installation is required.
 
 ## Local executable and configuration
 
@@ -13,7 +13,7 @@ On this Mac, always invoke `scripts/run.sh` for generate, edit, generate-batch, 
 
 On every invocation, the launcher reads `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`), selects `model_provider` (respecting a configured default `profile`), and uses `[model_providers.<provider>].base_url`. Changing that configuration takes effect on the next invocation without editing this skill. Only when the selected provider has no configured address does it fall back to `OPENAI_BASE_URL`, then `OPENAI_API_BASE`. If none is available, it reports a configuration error; no service address is hardcoded.
 
-The launcher adapts these values to the native program's legacy environment names only in its child process. Do not call the binaries directly on this installation or request separate `CODEX_API_KEY` / `CODEX_API_URL` setup. Do not compile from source during normal use.
+The launcher handles configuration and credentials. Do not call the binaries directly or request extra credential setup. Do not compile from source during normal use.
 
 ## Choose model and resolution from this conversation
 
