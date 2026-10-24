@@ -125,6 +125,8 @@ Use `--prompt-file` for long prompts. Use `--n` only for variants of the same pr
 
 Inspect each input image before editing. State its role and repeat invariants in the prompt so unrelated details do not drift.
 
+Use `edit` for changes to an existing image. It calls `POST /v1/images/edits` with `multipart/form-data`; new images use `POST /v1/images/generations`. The launcher supplies the configured API base and key for both operations. Pass each reference through `--image`, the edit instructions through `--prompt` or `--prompt-file`, and save to a new `--out` path.
+
 ```bash
 "<skill-dir>/scripts/run.sh" edit \
   --image "input/product.png" \
@@ -136,6 +138,8 @@ Inspect each input image before editing. State its role and repeat invariants in
 ```
 
 Repeat `--image` for multiple reference or compositing inputs. Use `--mask mask.png` for a localized edit when a compatible PNG mask is available. Preserve originals and always write edits to a new output path.
+
+Each uploaded image and mask must carry its actual image MIME type, such as `image/png` or `image/jpeg`. The bundled CLI detects this from file contents and sets the multipart part's `Content-Type`; the filename extension alone is insufficient. An `application/octet-stream` rejection is an upload-format error, not evidence that the selected model cannot edit images. Correct that error before assessing model support, and inspect the returned image to confirm the requested edit actually happened.
 
 ## Generate a batch
 

@@ -45,6 +45,18 @@ $codex-image 修改这张图片，只替换背景，保留人物和服装。
 
 移除 `--dry-run`，并添加 `--out output/imagegen/mountain.png` 即可生成图片。
 
+### 修改已有图片
+
+```bash
+~/.codex/skills/codex-image/scripts/run.sh edit \
+  --image input/original.png \
+  --prompt '只将蓝色杯子改成红色，保持杯形、把手、背景和构图不变。' \
+  --model gpt-image-2.5 --size 1K --quality auto \
+  --out output/imagegen/edited.png
+```
+
+改图使用 `POST /v1/images/edits`，以 `multipart/form-data` 上传参考图；可重复传 `--image`，局部修改可加 `--mask mask.png`。程序按文件实际内容设置每张图片及蒙版的 MIME 类型（如 `image/png`、`image/jpeg`），避免默认的 `application/octet-stream` 被接口拒绝。此类上传格式错误不代表模型不支持改图。原图保留，结果另存。
+
 ## 配置读取
 
 API 地址优先读取本机配置的 `[model_providers.<provider>].base_url`，仅当当前服务商未配置地址时，才依次尝试 `OPENAI_BASE_URL`、`OPENAI_API_BASE`。均未设置时直接报错，不使用固定中转站地址。密钥仅从运行环境传入子进程，不写入文件。

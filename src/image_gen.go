@@ -14,8 +14,10 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -670,6 +672,31 @@ func generate(prompt, out string, args commonArgs) (map[string]any, error) {
 	return resultJSON(spec, outputs), nil
 }
 
+// writeImagePart 根据实际文件内容设置图片类型，避免默认的 application/octet-stream。
+func writeImagePart(writer *multipart.Writer, field, path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	reader := bufio.NewReader(file)
+	header, err := reader.Peek(512)
+	if err != nil && err != io.EOF {
+		return err
+	}
+	partHeader := make(textproto.MIMEHeader)
+	partHeader.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{
+		"name": field, "filename": filepath.Base(path),
+	}))
+	partHeader.Set("Content-Type", http.DetectContentType(header))
+	part, err := writer.CreatePart(partHeader)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(part, reader)
+	return err
+}
+
 func edit(prompt string, imagePaths []string, mask, out string, args commonArgs) (map[string]any, error) {
 	if err := validateCommon(args); err != nil {
 		return nil, err
@@ -701,39 +728,23 @@ func edit(prompt string, imagePaths []string, mask, out string, args commonArgs)
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	for name, value := range spec.fields {
-		_ = writer.WriteField(name, value)
+		if err := writer.WriteField(name, value); err != nil {
+			return nil, err
+		}
 	}
 	for _, path := range imagePaths {
-		part, err := writer.CreateFormFile("image", filepath.Base(path))
-		if err != nil {
-			return nil, err
-		}
-		file, err := os.Open(path)
-		if err != nil {
-			return nil, err
-		}
-		_, err = io.Copy(part, file)
-		file.Close()
-		if err != nil {
+		if err := writeImagePart(writer, "image", path); err != nil {
 			return nil, err
 		}
 	}
 	if mask != "" {
-		part, err := writer.CreateFormFile("mask", filepath.Base(mask))
-		if err != nil {
-			return nil, err
-		}
-		file, err := os.Open(mask)
-		if err != nil {
-			return nil, err
-		}
-		_, err = io.Copy(part, file)
-		file.Close()
-		if err != nil {
+		if err := writeImagePart(writer, "mask", mask); err != nil {
 			return nil, err
 		}
 	}
-	writer.Close()
+	if err := writer.Close(); err != nil {
+		return nil, err
+	}
 	contentType := writer.FormDataContentType()
 	data := append([]byte(nil), body.Bytes()...)
 	client := &http.Client{Timeout: args.timeout}
