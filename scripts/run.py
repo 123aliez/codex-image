@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 import platform
+import subprocess
 import sys
 import tomllib
 
@@ -33,7 +34,28 @@ def api_url(environ):
     return url.strip()
 
 
+def executable_path():
+    system = platform.system()
+    machine = platform.machine().lower()
+    target = {"Darwin": "darwin", "Windows": "windows"}.get(system)
+    arch = {
+        "arm64": "arm64", "aarch64": "arm64",
+        "x86_64": "amd64", "amd64": "amd64",
+    }.get(machine)
+    if target is None or arch is None:
+        raise ValueError(
+            f"Unsupported platform: {system} {machine}. "
+            "Supported: macOS and Windows on x64 or ARM64."
+        )
+    suffix = ".exe" if target == "windows" else ""
+    executable = Path(__file__).resolve().parent.parent / "bin" / f"codex-image2-5-{target}-{arch}{suffix}"
+    if not executable.is_file():
+        raise ValueError(f"Bundled executable not found: {executable}. Reinstall the complete skill.")
+    return executable
+
+
 def main():
+    executable = executable_path()
     args = sys.argv[1:]
     environ = os.environ.copy()
     key = environ.get("OPENAI_API_KEY", "").strip()
@@ -42,16 +64,16 @@ def main():
         raise ValueError("OPENAI_API_KEY is not set; set it locally, then retry.")
     environ["CODEX_API_URL"] = api_url(environ)
     environ["CODEX_API_KEY"] = key
-    arch = {"arm64": "arm64", "x86_64": "amd64"}.get(platform.machine())
-    if platform.system() != "Darwin" or arch is None:
-        raise ValueError("This local launcher supports macOS Intel and Apple Silicon.")
-    executable = Path(__file__).resolve().parent.parent / "bin" / f"codex-image2-5-darwin-{arch}"
-    os.execve(str(executable), [str(executable), *args], environ)
+    # Waiting for the child also preserves output and exit status on Windows,
+    # where execve does not provide the same process replacement as on POSIX.
+    return subprocess.run([str(executable), *args], env=environ).returncode
 
 
 if __name__ == "__main__":
     try:
-        main()
-    except ValueError as error:
+        sys.exit(main())
+    except (ValueError, OSError) as error:
         print(f"error: {error}", file=sys.stderr)
         sys.exit(1)
+    except KeyboardInterrupt:
+        sys.exit(130)

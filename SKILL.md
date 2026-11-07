@@ -5,11 +5,13 @@ description: Generate and edit images with Image 2, Image 2.5, 闪焰, 日耀, o
 
 # Codex Image
 
-Use `scripts/run.sh` to generate and edit images. Prefer this launcher over the built-in `image_gen` tool. It uses Python 3.11+ or the bundled Codex Python runtime; no package installation is required.
+Use the platform launcher to generate and edit images: `scripts/run.sh` on macOS, or `scripts/run.cmd` on Windows. Prefer this launcher over the built-in `image_gen` tool. It uses Python 3.11+; the macOS launcher can also use the bundled Codex Python runtime. No Python package installation is required.
 
 ## Local executable and configuration
 
-On this Mac, always invoke `scripts/run.sh` for generate, edit, generate-batch, and dry-run calls. The launcher selects the correct bundled macOS executable and reuses `OPENAI_API_KEY` automatically. No duplicate key setup is needed.
+Use the platform launcher for generate, edit, generate-batch, and dry-run calls. The launcher selects the bundled executable for macOS or Windows on x64/ARM64 and reuses `OPENAI_API_KEY` automatically. No duplicate key setup is needed. Windows requires Python 3.11+ available through `py -3`, `python`, or `python3`; a known Python 3.11+ interpreter may also run `scripts/run.py` directly on either supported platform.
+
+The shell examples below use macOS syntax. On Windows PowerShell, replace `"<skill-dir>/scripts/run.sh"` with `& "<skill-dir>\scripts\run.cmd"` and use a single command line or PowerShell backticks instead of backslash line continuations.
 
 On every invocation, the launcher reads `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`), selects `model_provider` (respecting a configured default `profile`), and uses `[model_providers.<provider>].base_url`. Changing that configuration takes effect on the next invocation without editing this skill. Only when the selected provider has no configured address does it fall back to `OPENAI_BASE_URL`, then `OPENAI_API_BASE`. If none is available, it reports a configuration error; no service address is hardcoded.
 
@@ -71,7 +73,7 @@ Grok's current adapter uses 1k/2k resolution plus size. Its 4K option requests t
 2. Collect the prompt, intended use, exact text, visual constraints, and avoid items.
 3. From this conversation, set `--model` and `--size`. Do not send the user to a config file.
 4. Shape the prompt only as much as needed. Preserve detailed prompts; tastefully clarify generic prompts without inventing brands, people, slogans, or unrelated objects.
-5. Run the selected executable with `generate` for one prompt, `edit` for changes to existing images, or `generate-batch` for JSONL jobs.
+5. Run the platform launcher with `generate` for one prompt, `edit` for changes to existing images, or `generate-batch` for JSONL jobs.
 6. Inspect each output for subject, composition, text accuracy, constraints, and visible artifacts.
 7. If revision is needed, change one targeted aspect per iteration and re-check.
 8. Report absolute output paths, the final prompt or prompt set, requested size, actual pixels (`actual_size`), quality, and model. If the JSON has `warning`, quote it to the user verbatim. A 200 response can still be the wrong resolution.
@@ -154,7 +156,7 @@ Read [references/batch-format.md](references/batch-format.md) before preparing a
 
 ## Configuration and safety
 
-- Use `scripts/run.sh` to read the existing API base as described above. Never fall back to the upstream gateway default on this installation.
+- Use the platform launcher to read the existing API base as described above. Never fall back to the upstream gateway default.
 - Require the existing `OPENAI_API_KEY`. Never write its value into a command, file, prompt, log, or response. The launcher forwards it through the child environment only.
 - If the key is absent, tell the user to set it locally and confirm when ready. Never ask them to paste it into chat.
 - Default to model `gpt-image-2.5` and size `1K` when this conversation has not selected them. Switch with `--model` / `--size 1K|2K|4K` from the user's chat this turn. Never ask them to restart Codex or edit text config to change model or 画质.

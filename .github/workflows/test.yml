@@ -1,0 +1,29 @@
+name: Cross-platform checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+      - name: Launcher tests and native offline smoke test
+        run: python -m unittest discover -s tests -v
+      - name: Image CLI tests
+        run: go test src/image_gen.go src/image_gen_test.go
