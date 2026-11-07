@@ -15,15 +15,27 @@ jobs:
         os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: stable
           cache: false
       - name: Launcher tests and native offline smoke test
-        run: python -m unittest discover -s tests -v
+        shell: python
+        run: |
+          import io
+          import sys
+          import unittest
+          output = io.StringIO()
+          result = unittest.TextTestRunner(stream=output, verbosity=2).run(
+              unittest.defaultTestLoader.discover('tests'))
+          print(output.getvalue())
+          if not result.wasSuccessful():
+              detail = output.getvalue().replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+              print(f'::error::{detail}')
+          sys.exit(0 if result.wasSuccessful() else 1)
       - name: Image CLI tests
         run: go test src/image_gen.go src/image_gen_test.go
