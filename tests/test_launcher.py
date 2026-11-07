@@ -86,7 +86,8 @@ class ConfigurationTests(unittest.TestCase):
             self.assertNotIn("shell", child.call_args.kwargs)
 
     def test_generation_without_key_stops_before_child(self):
-        with patch.dict(os.environ, {}, clear=True), \
+        with patch.object(launcher, "executable_path", return_value=ROOT / "unused.exe"), \
+                patch.dict(os.environ, {}, clear=True), \
                 patch.object(sys, "argv", ["run.py", "generate", "--prompt", "cup"]), \
                 patch.object(launcher.subprocess, "run") as child:
             with self.assertRaisesRegex(ValueError, "OPENAI_API_KEY is not set"):
