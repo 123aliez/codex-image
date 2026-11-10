@@ -9,7 +9,7 @@ Use the platform launcher to generate and edit images: `scripts/run.sh` on macOS
 
 ## Local executable and configuration
 
-Use the platform launcher for generate, edit, generate-batch, and dry-run calls. The launcher selects the bundled executable for macOS or Windows on x64/ARM64 and reuses `OPENAI_API_KEY` automatically. No duplicate key setup is needed. Windows requires Python 3.11+ available through `py -3`, `python`, or `python3`; a known Python 3.11+ interpreter may also run `scripts/run.py` directly on either supported platform.
+Use the platform launcher for generate, edit, and generate-batch calls. The launcher selects the bundled executable for macOS or Windows on x64/ARM64. It reads the API key only from `OPENAI_API_KEY` in its process environment; it does not read Codex login credentials. A key configured in another terminal or conversation may not be available to this process. Windows requires Python 3.11+ available through `py -3`, `python`, or `python3`; a known Python 3.11+ interpreter may also run `scripts/run.py` directly on either supported platform.
 
 The shell examples below use macOS syntax. On Windows PowerShell, replace `"<skill-dir>/scripts/run.sh"` with `& "<skill-dir>\scripts\run.cmd"` and use a single command line or PowerShell backticks instead of backslash line continuations.
 
@@ -161,7 +161,7 @@ Read [references/batch-format.md](references/batch-format.md) before preparing a
 - If the key is absent, tell the user to set it locally and confirm when ready. Never ask them to paste it into chat.
 - Default to model `gpt-image-2.5` and size `1K` when this conversation has not selected them. Switch with `--model` / `--size 1K|2K|4K` from the user's chat this turn. Never ask them to restart Codex or edit text config to change model or 画质.
 - `--quality` defaults to `auto` (`low`, `medium`, `high`, or `auto`).
-- Use `--dry-run` to validate a request without network access or requiring a key.
+- Confirm generation or editing works only after a real API request returns a usable image. Launcher and parameter tests do not establish authentication, model availability, or upstream image generation support.
 - Save project-bound assets inside the current project. The CLI default is `output/imagegen/`.
 - Do not overwrite files unless the user explicitly authorizes it and `--force` is passed.
 - Native transparent output is not guaranteed. Do not promise it or silently switch tools.

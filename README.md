@@ -22,7 +22,7 @@ $codex-image 修改这张图片，只替换背景，保留人物和服装。
 
 支持多张参考图、局部编辑和批量生成。修改结果另存，保留原图。
 
-自动读取本机 Codex 配置，复用 `OPENAI_API_KEY`。
+自动读取本机 Codex 配置中的接口地址。API Key 需通过启动器进程可读取的 `OPENAI_API_KEY` 环境变量提供；不会自动读取 Codex 登录凭据。
 
 ## 平台支持
 
@@ -37,18 +37,6 @@ $codex-image 修改这张图片，只替换背景，保留人物和服装。
 
 所有入口都会按本机系统和架构选择程序，并读取 `CODEX_HOME/config.toml`（默认 `~/.codex/config.toml`，Windows 为用户目录下的 `.codex\config.toml`）中的服务地址；没有配置地址时依次使用 `OPENAI_BASE_URL`、`OPENAI_API_BASE`。API 服务需要支持所选图片模型。
 
-离线检查（不生成图片、不发送 API 请求）：
-
-```sh
-# macOS
-./scripts/run.sh generate --prompt "A blue cup" --model gpt-image-2.5 --size 1K --dry-run
-```
-
-```powershell
-# Windows PowerShell
-.\scripts\run.cmd generate --prompt "A blue cup" --model gpt-image-2.5 --size 1K --dry-run
-```
-
-离线检查仍需配置服务地址，但无需 API Key。更新已安装版本时，可让 Codex 重新安装本仓库中的 skill。
+更新已安装版本时，可让 Codex 重新安装本仓库中的 skill。
 
 [MIT License](LICENSE)
