@@ -23,7 +23,7 @@ jobs:
         with:
           go-version: stable
           cache: false
-      - name: Launcher tests and native offline smoke test
+      - name: Environment lookup and authenticated image API integration tests
         shell: python
         run: |
           import io

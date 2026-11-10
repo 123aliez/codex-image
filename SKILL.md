@@ -9,13 +9,15 @@ Use the platform launcher to generate and edit images: `scripts/run.sh` on macOS
 
 ## Local executable and configuration
 
-Use the platform launcher for generate, edit, and generate-batch calls. The launcher selects the bundled executable for macOS or Windows on x64/ARM64. It reads the API key only from `OPENAI_API_KEY` in its process environment; it does not read Codex login credentials. A key configured in another terminal or conversation may not be available to this process. Windows requires Python 3.11+ available through `py -3`, `python`, or `python3`; a known Python 3.11+ interpreter may also run `scripts/run.py` directly on either supported platform.
+This skill uses third-party compatible Images APIs. Use the platform launcher for generate, edit, and generate-batch calls. The launcher selects the bundled executable for macOS or Windows on x64/ARM64. Windows requires Python 3.11+ available through `py -3`, `python`, or `python3`; a known Python 3.11+ interpreter may also run `scripts/run.py` directly on either supported platform.
 
 The shell examples below use macOS syntax. On Windows PowerShell, replace `"<skill-dir>/scripts/run.sh"` with `& "<skill-dir>\scripts\run.cmd"` and use a single command line or PowerShell backticks instead of backslash line continuations.
 
-On every invocation, the launcher reads `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`), selects `model_provider` (respecting a configured default `profile`), and uses `[model_providers.<provider>].base_url`. Changing that configuration takes effect on the next invocation without editing this skill. Only when the selected provider has no configured address does it fall back to `OPENAI_BASE_URL`, then `OPENAI_API_BASE`. If none is available, it reports a configuration error; no service address is hardcoded.
+On every invocation, the launcher reads `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`), selects `model_provider` (respecting a configured default `profile`), and uses `[model_providers.<provider>].base_url`. The URL comes only from that configuration; a missing address is an error. No service address is hardcoded.
 
-The launcher handles configuration and credentials. Do not call the binaries directly or request extra credential setup. Do not compile from source during normal use.
+The API key comes only from the selected provider's `env_key` environment variable, defaulting to `OPENAI_API_KEY`. The process environment takes priority. If missing there, the launcher reads Windows user/system environment variables from the registry, or the current macOS login session's launchd environment using `launchctl getenv`. It never reads API keys or login tokens from `auth.json`, the keychain, or inline configuration. `requires_openai_auth` does not change the third-party image request's authentication.
+
+The launcher handles configuration and environment lookup. Do not call the binaries directly or request duplicate credential setup when the environment variable already exists. Do not compile from source during normal use.
 
 ## Choose model and resolution from this conversation
 
@@ -157,8 +159,8 @@ Read [references/batch-format.md](references/batch-format.md) before preparing a
 ## Configuration and safety
 
 - Use the platform launcher to read the existing API base as described above. Never fall back to the upstream gateway default.
-- Require the existing `OPENAI_API_KEY`. Never write its value into a command, file, prompt, log, or response. The launcher forwards it through the child environment only.
-- If the key is absent, tell the user to set it locally and confirm when ready. Never ask them to paste it into chat.
+- Use the existing API-key environment variable selected above. Never write its value into a command, file, prompt, log, or response. The launcher forwards it through the child environment only.
+- If the variable is absent from both process and system environments, tell the user to set it locally. Windows supports user/system environment settings; macOS supports the current launchd session or launching Codex from an appropriately configured terminal. A `.zshrc` entry alone may not reach a desktop-launched app, and launchd variables may need to be set again after reboot. Never ask them to paste the key into chat.
 - Default to model `gpt-image-2.5` and size `1K` when this conversation has not selected them. Switch with `--model` / `--size 1K|2K|4K` from the user's chat this turn. Never ask them to restart Codex or edit text config to change model or 画质.
 - `--quality` defaults to `auto` (`low`, `medium`, `high`, or `auto`).
 - Confirm generation or editing works only after a real API request returns a usable image. Launcher and parameter tests do not establish authentication, model availability, or upstream image generation support.
