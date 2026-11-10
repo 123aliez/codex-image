@@ -218,11 +218,26 @@ class NativeLauncherTests(unittest.TestCase):
         png_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF1sAAAAASUVORK5CYII="
         png = base64.b64decode(png_b64)
         requests = []
+        events = []
 
         class ImageService(BaseHTTPRequestHandler):
             def log_message(self, *args): pass
 
+            def do_GET(self):
+                events.append(("GET", self.path))
+                if self.path != "/v1/models":
+                    self.send_error(404)
+                    return
+                if self.headers.get("Authorization") != "Bearer test-only-provider-key":
+                    self.send_error(401)
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"data": [{"id": "gpt-image-2.5"}, {"id": "gpt-image-2.5-flare"}]}).encode())
+
             def do_POST(self):
+                events.append(("POST", self.path))
                 body = self.rfile.read(int(self.headers["Content-Length"]))
                 requests.append((self.path, self.headers.get("Authorization"), self.headers.get("Content-Type"), body))
                 if self.headers.get("Authorization") != "Bearer test-only-provider-key":
@@ -269,8 +284,8 @@ class NativeLauncherTests(unittest.TestCase):
                 with self.subTest(command=command):
                     out = f"output path/cup-{index}.png"
                     result = subprocess.run(
-                        [*command, "generate", "--prompt", "A blue cup with spaces", "--model",
-                         "gpt-image-2.5", "--size", "1K", "--out", out, "--max-attempts", "1"],
+                        [*command, "generate", "--prompt", "A blue cup with spaces",
+                         "--size", "1K", "--out", out, "--max-attempts", "1"],
                         cwd=directory, env=environ, capture_output=True, text=True, encoding="utf-8", timeout=30,
                     )
                     self.assertEqual(result.returncode, 0, result.stderr)
@@ -280,6 +295,8 @@ class NativeLauncherTests(unittest.TestCase):
                     self.assertEqual(path, "/v1/images/generations")
                     self.assertEqual(authorization, "Bearer test-only-provider-key")
                     self.assertEqual(json.loads(body)["prompt"], "A blue cup with spaces")
+                    self.assertEqual(json.loads(body)["model"], "gpt-image-2.5-flare")
+                    self.assertEqual(events[-2:], [("GET", "/v1/models"), ("POST", "/v1/images/generations")])
                     edited = subprocess.run(
                         [*command, "edit", "--image", out, "--prompt", "Change the cup color", "--model",
                          "gpt-image-2.5", "--size", "1K", "--out", f"output path/edited-{index}.png",
@@ -293,6 +310,7 @@ class NativeLauncherTests(unittest.TestCase):
                     self.assertIn("multipart/form-data", content_type)
                     self.assertIn(b"Content-Type: image/png", body)
                     self.assertIn(png, body)
+                    self.assertEqual(events[-2:], [("GET", "/v1/models"), ("POST", "/v1/images/edits")])
                     self.assertNotIn("test-only-provider-key", result.stdout + result.stderr + edited.stdout + edited.stderr)
                     bad_args = subprocess.run(
                         [*command, "generate", "--unknown-flag"],
@@ -307,6 +325,18 @@ class NativeLauncherTests(unittest.TestCase):
                     self.assertNotEqual(denied.returncode, 0)
                     self.assertIn("401", denied.stderr)
                     self.assertNotIn("wrong-test-key", denied.stdout + denied.stderr)
+                    submitted = len(requests)
+                    unavailable = subprocess.run(
+                        [*command, "generate", "--prompt", "cup", "--model", "gpt-image-2.6-sunburst"],
+                        cwd=directory, env=environ, capture_output=True, text=True, timeout=30,
+                    )
+                    self.assertNotEqual(unavailable.returncode, 0)
+                    self.assertIn("no image request was sent", unavailable.stderr)
+                    self.assertEqual(len(requests), submitted)
+                    catalog = subprocess.run([*command, "models"], cwd=directory, env=environ,
+                                             capture_output=True, text=True, timeout=30)
+                    self.assertEqual(catalog.returncode, 0, catalog.stderr)
+                    self.assertEqual(json.loads(catalog.stdout)["default_model"], "gpt-image-2.5-flare")
 
 
 if __name__ == "__main__":

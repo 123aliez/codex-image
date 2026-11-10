@@ -12,9 +12,108 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestSelectAvailableModel(t *testing.T) {
+	for _, test := range []struct {
+		name, requested string
+		explicit        bool
+		models          []string
+		want            string
+		fail            bool
+	}{
+		{"default flare", "", false, []string{"gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.6-flare"}, "gpt-image-2.5-flare", false},
+		{"other flare", "", false, []string{"gpt-image-2", "gpt-image-2.6-flare"}, "gpt-image-2.6-flare", false},
+		{"no silent non-flare fallback", "", false, []string{"gpt-image-2"}, "", true},
+		{"explicit model", "Image 2", true, []string{"gpt-image-2", "gpt-image-2.5-flare"}, "gpt-image-2", false},
+		{"unavailable explicit model", "gpt-image-2.5", true, []string{"gpt-image-2.5-flare"}, "", true},
+		{"gateway ID", "gpt-image-2.6-sunburst", true, []string{"gpt-image-2.6-sunburst"}, "gpt-image-2.6-sunburst", false},
+		{"video rejected", "grok-video-flare", true, []string{"grok-video-flare"}, "", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := selectAvailableModel(test.requested, test.explicit, test.models)
+			if (err != nil) != test.fail || got != test.want {
+				t.Fatalf("got %q, error %v; want %q, fail %v", got, err, test.want, test.fail)
+			}
+		})
+	}
+}
+
+func TestModelListUsesCurrentEndpointAndKey(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/models" || r.Header.Get("Authorization") != "Bearer test-key" {
+			t.Errorf("incorrect model-list request: %s %s", r.Method, r.URL.Path)
+		}
+		io.WriteString(w, `{"data":[{"id":"gpt-image-2.5-flare"},{"id":"gpt-image-2"},{"id":"gpt-image-2.5-flare"}]}`)
+	}))
+	defer server.Close()
+	t.Setenv("CODEX_API_URL", server.URL+"/v1")
+	t.Setenv("CODEX_API_KEY", "test-key")
+	models, err := availableModels()
+	if err != nil || strings.Join(models, ",") != "gpt-image-2,gpt-image-2.5-flare" {
+		t.Fatalf("models %v, error %v", models, err)
+	}
+}
+
+func TestMalformedHTTPFramingKeepsCompleteJSON(t *testing.T) {
+	body := `{"data":[{"b64_json":"aW1hZ2U="}]}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "1000")
+		io.WriteString(w, body)
+	}))
+	defer server.Close()
+	got, err := doRequest(server.Client(), func() (*http.Request, error) {
+		return http.NewRequest(http.MethodPost, server.URL, strings.NewReader(`{}`))
+	}, 3)
+	if err != nil || string(got) != body {
+		t.Fatalf("lost complete JSON response: %q, error %v", got, err)
+	}
+}
+
+func TestTruncatedResponseIsNotRetried(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Length", "1000")
+		io.WriteString(w, `{"data":[{"b64_json":"truncated`)
+	}))
+	defer server.Close()
+	_, err := doRequest(server.Client(), func() (*http.Request, error) {
+		return http.NewRequest(http.MethodPost, server.URL, strings.NewReader(`{}`))
+	}, 3)
+	if err == nil || !strings.Contains(err.Error(), "HTTP 200") || !strings.Contains(err.Error(), "unexpected EOF") || !strings.Contains(err.Error(), "do not resubmit automatically") {
+		t.Fatalf("missing actionable response error: %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("sent %d generation requests after ambiguous success", requests)
+	}
+}
+
+func TestBatchValidatesAllModelsBeforeAnyGeneration(t *testing.T) {
+	posts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			io.WriteString(w, `{"data":[{"id":"gpt-image-2.5-flare"}]}`)
+		} else {
+			posts++
+			http.Error(w, "must not generate", 500)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("CODEX_API_URL", server.URL)
+	t.Setenv("CODEX_API_KEY", "test-key")
+	path := filepath.Join(t.TempDir(), "jobs.jsonl")
+	if err := os.WriteFile(path, []byte("{\"prompt\":\"cup\"}\n{\"prompt\":\"kite\",\"model\":\"unlisted-model\"}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	err := runBatch([]string{"--input", path})
+	if err == nil || !strings.Contains(err.Error(), "batch job 2") || posts != 0 {
+		t.Fatalf("invalid batch was partially submitted: posts %d, error %v", posts, err)
+	}
+}
 
 func TestEditUploadsImageMIMETypes(t *testing.T) {
 	var pngData, jpegData bytes.Buffer

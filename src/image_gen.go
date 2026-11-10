@@ -16,11 +16,13 @@ import (
 	"io"
 	"mime"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/textproto"
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,8 +30,7 @@ import (
 )
 
 const (
-	defaultAPIURL    = "https://apinebula.com"
-	defaultModel     = "gpt-image-2.5"
+	defaultModel     = "gpt-image-2.5-flare"
 	defaultGrokModel = "grok-imagine-image-2.0"
 	defaultSize      = "1K"
 	defaultQuality   = "auto"
@@ -137,15 +138,16 @@ type batchJob struct {
 	Out     string `json:"out,omitempty"`
 }
 
-func endpoint(base, operation string) string {
+func apiBase(base string) string {
 	base = strings.TrimRight(strings.TrimSpace(base), "/")
-	if base == "" {
-		base = defaultAPIURL
-	}
 	if !strings.HasSuffix(base, "/v1") {
 		base += "/v1"
 	}
-	return base + "/images/" + operation
+	return base
+}
+
+func endpoint(base, operation string) string {
+	return apiBase(base) + "/images/" + operation
 }
 
 // resolveSize 接受 1K/2K/4K、auto，或 WIDTHxHEIGHT。发给上游的永远是后两种。
@@ -538,6 +540,101 @@ func apiKey() (string, error) {
 	return key, nil
 }
 
+func availableModels() ([]string, error) {
+	if strings.TrimSpace(os.Getenv("CODEX_API_URL")) == "" {
+		return nil, errors.New("CODEX_API_URL is not set; use the platform launcher to read config.toml")
+	}
+	key, err := apiKey()
+	if err != nil {
+		return nil, err
+	}
+	client := &http.Client{Timeout: 30 * time.Second}
+	raw, err := doRequest(client, func() (*http.Request, error) {
+		req, err := http.NewRequest(http.MethodGet, apiBase(os.Getenv("CODEX_API_URL"))+"/models", nil)
+		if err == nil {
+			req.Header.Set("Authorization", "Bearer "+key)
+			req.Header.Set("Accept", "application/json")
+		}
+		return req, err
+	}, 2)
+	if err != nil {
+		return nil, fmt.Errorf("could not list available models: %w", err)
+	}
+	var response struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return nil, errors.New("model list is not a valid OpenAI-compatible models response")
+	}
+	seen := map[string]bool{}
+	var models []string
+	for _, model := range response.Data {
+		id := strings.TrimSpace(model.ID)
+		if id != "" && !seen[id] {
+			seen[id] = true
+			models = append(models, id)
+		}
+	}
+	if len(models) == 0 {
+		return nil, errors.New("the configured API key has no models in /v1/models")
+	}
+	sort.Strings(models)
+	return models, nil
+}
+
+func selectAvailableModel(requested string, explicit bool, models []string) (string, error) {
+	if explicit {
+		model, err := resolveModel(requested)
+		if err != nil {
+			return "", err
+		}
+		for _, available := range models {
+			if available == model {
+				return model, nil
+			}
+		}
+		return "", fmt.Errorf("requested model %q is not listed for this API key; run the launcher with models to see available IDs; no image request was sent", model)
+	}
+	for _, model := range models {
+		if model == defaultModel {
+			return model, nil
+		}
+	}
+	// Prefer the familiar 2.5 Flare ID; otherwise use a listed Flare variant.
+	candidates := append([]string(nil), models...)
+	sort.Sort(sort.Reverse(sort.StringSlice(candidates)))
+	for _, model := range candidates {
+		if strings.HasSuffix(strings.ToLower(model), "-flare") && !isVideoModel(model) {
+			return model, nil
+		}
+	}
+	return "", errors.New("no Flare model is listed for this API key; select an available image model explicitly; no image request was sent")
+}
+
+func modelWasSpecified(fs *flag.FlagSet) bool {
+	explicit := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "model" {
+			explicit = true
+		}
+	})
+	return explicit
+}
+
+func configureAvailableModel(fs *flag.FlagSet, args *commonArgs) error {
+	if args.dryRun {
+		return nil
+	}
+	models, err := availableModels()
+	if err != nil {
+		return err
+	}
+	args.model, err = selectAvailableModel(args.model, modelWasSpecified(fs), models)
+	return err
+}
+
 func doRequest(client *http.Client, makeRequest func() (*http.Request, error), maxAttempts int) ([]byte, error) {
 	var last string
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
@@ -550,7 +647,23 @@ func doRequest(client *http.Client, makeRequest func() (*http.Request, error), m
 			body, readErr := io.ReadAll(resp.Body)
 			resp.Body.Close()
 			if readErr != nil {
-				return nil, errors.New("could not read API response")
+				// Some gateways finish the JSON but close HTTP framing incorrectly.
+				// Keep a complete response instead of losing a successfully generated image.
+				if resp.StatusCode >= 200 && resp.StatusCode < 300 && json.Valid(bytes.TrimSpace(body)) {
+					return body, nil
+				}
+				reason := "response stream interrupted"
+				var timeout net.Error
+				if errors.As(readErr, &timeout) && timeout.Timeout() {
+					reason = "response read timed out"
+				} else if errors.Is(readErr, io.ErrUnexpectedEOF) {
+					reason = "connection closed before the response finished (unexpected EOF)"
+				}
+				note := ""
+				if req.Method == http.MethodPost {
+					note = "; the upstream job may already have completed; do not resubmit automatically"
+				}
+				return nil, fmt.Errorf("could not read complete API response: HTTP %d, received %d bytes, Content-Length %d: %s%s", resp.StatusCode, len(body), resp.ContentLength, reason, note)
 			}
 			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 				return body, nil
@@ -561,6 +674,9 @@ func doRequest(client *http.Client, makeRequest func() (*http.Request, error), m
 			}
 		} else {
 			last = "API request failed: network error or timeout"
+			if req.Method == http.MethodPost {
+				return nil, errors.New(last + "; the upstream may already have accepted the job; do not resubmit automatically")
+			}
 			if attempt == maxAttempts {
 				return nil, errors.New(last)
 			}
@@ -780,7 +896,7 @@ func printJSON(value any) {
 
 func parseCommon(fs *flag.FlagSet, argv []string, args *commonArgs) error {
 	var timeout float64
-	fs.StringVar(&args.model, "model", defaultModel, "image model (default gpt-image-2.5; Image 2, Image 2.5, GPT or Grok image ids, not video)")
+	fs.StringVar(&args.model, "model", defaultModel, "image model (default: an available Flare model; explicit IDs must be listed by /v1/models)")
 	fs.StringVar(&args.size, "size", defaultSize, "1K, 2K, 4K, auto, or WIDTHxHEIGHT")
 	fs.StringVar(&args.quality, "quality", defaultQuality, "low, medium, high, or auto")
 	fs.IntVar(&args.n, "n", 1, "number of variants (1-10)")
@@ -818,6 +934,9 @@ func runGenerate(argv []string) error {
 	if err != nil {
 		return err
 	}
+	if err := configureAvailableModel(fs, &args); err != nil {
+		return err
+	}
 	result, err := generate(finalPrompt, out, args)
 	if err == nil {
 		printJSON(result)
@@ -843,6 +962,9 @@ func runEdit(argv []string) error {
 	}
 	finalPrompt, err := promptValue(prompt, promptFile)
 	if err != nil {
+		return err
+	}
+	if err := configureAvailableModel(fs, &args); err != nil {
 		return err
 	}
 	result, err := edit(finalPrompt, images, mask, out, args)
@@ -886,6 +1008,22 @@ func runBatch(argv []string) error {
 	}
 	if err := scanner.Err(); err != nil || len(jobs) == 0 {
 		return errors.New("batch input contains no valid jobs")
+	}
+	if !args.dryRun {
+		models, err := availableModels()
+		if err != nil {
+			return err
+		}
+		for index := range jobs {
+			requested, explicit := args.model, modelWasSpecified(fs)
+			if jobs[index].Model != "" {
+				requested, explicit = jobs[index].Model, true
+			}
+			jobs[index].Model, err = selectAvailableModel(requested, explicit, models)
+			if err != nil {
+				return fmt.Errorf("batch job %d: %w", index+1, err)
+			}
+		}
 	}
 	type result struct {
 		Index int            `json:"index"`
@@ -959,8 +1097,8 @@ func runBatch(argv []string) error {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "Codex Image 2.5")
-	fmt.Fprintln(os.Stderr, "Usage: codex-image2-5 <generate|generate-batch|edit> [options]")
-	fmt.Fprintln(os.Stderr, "Defaults: --model gpt-image-2.5  --size 1K  --quality auto")
+	fmt.Fprintln(os.Stderr, "Usage: codex-image2-5 <models|generate|generate-batch|edit> [options]")
+	fmt.Fprintln(os.Stderr, "Lists available models before image requests; defaults to a listed Flare model, 1K, auto quality.")
 	fmt.Fprintln(os.Stderr, "GPT:   gpt-image-2  gpt-image-2.5  gpt-image-2.5-flare  gpt-image-2.5-sunburst")
 	fmt.Fprintln(os.Stderr, "Grok:  grok-imagine  grok-imagine-image-2.0  grok-imagine-image-quality")
 	fmt.Fprintln(os.Stderr, "Video models are not supported.")
@@ -975,6 +1113,13 @@ func main() {
 	}
 	var err error
 	switch os.Args[1] {
+	case "models":
+		var models []string
+		models, err = availableModels()
+		if err == nil {
+			preferred, _ := selectAvailableModel("", false, models)
+			printJSON(map[string]any{"models": models, "default_model": preferred})
+		}
 	case "generate":
 		err = runGenerate(os.Args[2:])
 	case "generate-batch":
